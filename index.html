@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>นำทางหลายจุด — Multi-Nav</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { --bg:#0f172a; --panel:#1e293b; --line:#334155; --text:#e2e8f0; --muted:#94a3b8;
+          --accent:#2563eb; --accent2:#10b981; --danger:#ef4444; --purple:#7c3aed; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; font-family:'Segoe UI',system-ui,'Noto Sans Thai',sans-serif; color:var(--text); }
+  #app { display:flex; height:100vh; overflow:hidden; }
+  #map { flex:1; background:#0b1220; position:relative; }
+  #panel { width:350px; background:var(--panel); border-right:1px solid var(--line);
+           display:flex; flex-direction:column; min-height:0; }
+  header { padding:11px 14px; border-bottom:1px solid var(--line); background:#111c33; }
+  header h1 { margin:0; font-size:1.08rem; } header p { margin:3px 0 0; font-size:.72rem; color:var(--muted); }
+  .section { padding:10px 14px; border-bottom:1px solid var(--line); }
+  .search-row { display:flex; gap:6px; }
+  input[type=text] { flex:1; padding:9px 10px; border-radius:8px; border:1px solid var(--line);
+                     background:var(--bg); color:var(--text); font-size:.9rem; min-width:0; }
+  .btn { border:none; border-radius:8px; padding:9px 12px; font-size:.85rem; font-weight:600; cursor:pointer; color:#fff; }
+  .btn-primary{background:var(--accent);} .btn-go{background:var(--accent2);} .btn-save{background:var(--purple);}
+  .btn-danger{background:var(--danger);} .btn-ghost{background:#334155;}
+  .btn-sm{padding:6px 9px; font-size:.78rem;} .btn:active{filter:brightness(1.15);} .btn[disabled]{opacity:.45; cursor:not-allowed;}
+  .hint{font-size:.72rem; color:var(--muted); margin:6px 0 0;}
+  .toggle{display:flex; align-items:center; gap:8px; font-size:.82rem;}
+  .toggle input{width:18px; height:18px; accent-color:var(--accent2);}
+  /* segmented tabs */
+  .tabs{display:flex; padding:8px 14px; gap:6px; border-bottom:1px solid var(--line);}
+  .tab{flex:1; text-align:center; padding:8px; border-radius:8px; background:var(--bg); color:var(--muted);
+       font-size:.84rem; font-weight:600; cursor:pointer; border:1px solid var(--line);}
+  .tab.active{background:var(--accent); color:#fff; border-color:var(--accent);}
+  .view{flex:1; display:flex; flex-direction:column; min-height:0;}
+  #list, #history-list{flex:1; overflow-y:auto; min-height:0;}
+  .pin{display:flex; align-items:center; gap:8px; padding:9px 12px; border-bottom:1px solid var(--line);}
+  .pin-num{width:24px; height:24px; border-radius:50%; background:var(--accent); color:#fff;
+           display:flex; align-items:center; justify-content:center; font-size:.76rem; font-weight:700; flex-shrink:0;}
+  .pin-body{flex:1; min-width:0;}
+  .pin-name{width:100%; background:transparent; border:none; color:var(--text); font-size:.88rem; font-weight:600; padding:2px 0;}
+  .pin-name:focus{outline:none;}
+  .pin-sub{font-size:.67rem; color:var(--muted);}
+  .pin-acts{display:flex; gap:4px; flex-shrink:0;}
+  .icon-btn{border:none; background:#334155; color:#fff; width:30px; height:30px; border-radius:7px;
+            font-size:.9rem; cursor:pointer; display:flex; align-items:center; justify-content:center;}
+  .icon-btn.nav{background:var(--accent2);} .icon-btn.del{background:var(--danger);} .icon-btn:active{filter:brightness(1.2);}
+  .empty{padding:24px 14px; text-align:center; color:var(--muted); font-size:.84rem;}
+  /* history cards */
+  .trip{padding:10px 12px; border-bottom:1px solid var(--line);}
+  .trip-top{display:flex; align-items:center; gap:8px;}
+  .trip-name{flex:1; font-weight:700; font-size:.92rem;}
+  .trip-sub{font-size:.7rem; color:var(--muted); margin-top:2px;}
+  .trip-acts{display:flex; gap:6px; margin-top:8px;}
+  .trip-acts .btn{flex:1;}
+  footer{padding:10px 14px; border-top:1px solid var(--line); display:flex; flex-direction:column; gap:7px; background:#111c33;}
+  .row{display:flex; gap:7px;} .row .btn{flex:1;}
+  .count-chip{position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:500;
+              background:rgba(15,23,42,.9); color:#fff; padding:5px 14px; border-radius:20px; font-size:.82rem; border:1px solid var(--line);}
+  .leaflet-div-pin{background:var(--accent); color:#fff; border:2px solid #fff; border-radius:50% 50% 50% 0;
+                   width:26px; height:26px; transform:rotate(-45deg); display:flex; align-items:center; justify-content:center; box-shadow:0 1px 4px rgba(0,0,0,.5);}
+  .leaflet-div-pin span{transform:rotate(45deg); font-weight:700; font-size:.78rem;}
+  #search-results{margin-top:6px;}
+  .sr-item{padding:7px 9px; border-radius:7px; background:var(--bg); border:1px solid var(--line); margin-bottom:5px; cursor:pointer; font-size:.8rem;}
+  .sr-item:active{background:#273449;}
+  @media (max-width:760px){ #app{flex-direction:column;} #map{height:48vh;} #panel{width:100%; flex:1; border-right:none; border-top:1px solid var(--line);} }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="panel">
+    <header>
+      <h1>🧭 นำทางหลายจุด</h1>
+      <p>บันทึกเส้นทางแต่ละวัน · เปิดดูย้อนหลังได้</p>
+    </header>
+
+    <div class="tabs">
+      <div class="tab active" id="tab-current" data-view="current">📍 ทริปปัจจุบัน</div>
+      <div class="tab" id="tab-history" data-view="history">📅 ประวัติ</div>
+    </div>
+
+    <!-- CURRENT TRIP VIEW -->
+    <div class="view" id="view-current">
+      <div class="section">
+        <div class="search-row">
+          <input type="text" id="search" placeholder="ค้นหาสถานที่ หรือ พิกัด 13.75,100.5">
+          <button class="btn btn-primary" id="btn-search">🔍</button>
+        </div>
+        <div id="search-results"></div>
+        <label class="toggle" style="margin-top:9px">
+          <input type="checkbox" id="addmode" checked>
+          <span>📍 โหมดปักหมุด (แตะแผนที่เพื่อเพิ่มจุด)</span>
+        </label>
+        <p class="hint">แตะแผนที่ = เพิ่มหมุด · ลากหมุด = ย้าย</p>
+      </div>
+      <div id="list"></div>
+    </div>
+
+    <!-- HISTORY VIEW -->
+    <div class="view" id="view-history" style="display:none">
+      <div id="history-list"></div>
+      <div class="section">
+        <div class="row">
+          <button class="btn btn-ghost btn-sm" id="btn-export">⬇️ สำรองข้อมูล</button>
+          <button class="btn btn-ghost btn-sm" id="btn-import">⬆️ นำเข้า</button>
+          <input type="file" id="import-file" accept="application/json" style="display:none">
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <div class="row">
+        <button class="btn btn-go" id="btn-route" style="flex:2">🧭 นำทางรวมทุกจุด</button>
+        <button class="btn btn-save" id="btn-savetrip">💾 บันทึกทริป</button>
+      </div>
+      <div class="row">
+        <button class="btn btn-ghost btn-sm" id="btn-locate">📌 ตำแหน่งฉัน</button>
+        <button class="btn btn-danger btn-sm" id="btn-clear">🗑️ ล้างจุด</button>
+      </div>
+    </footer>
+  </div>
+  <div id="map"><div class="count-chip" id="chip" style="display:none"></div></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet.gridlayer.googlemutant@0.14.0/dist/Leaflet.GoogleMutant.js"></script>
+<script src="maps-config.js"></script>
+<script>
+(function(){
+  const STORE_PINS = 'multinav-pins';   // current working pins
+  const STORE_TRIPS = 'multinav-trips'; // saved daily trips
+  let pins = [];    // { id, name, lat, lng, marker }
+  let trips = [];   // { id, name, date, pins:[{name,lat,lng}] }
+  let map, routeLine, meMarker=null;
+
+  // ---------- Map + layers ----------
+  map = L.map('map', { zoomControl:true }).setView([13.7563,100.5018], 13);
+
+  // Esri layers — always available; also the fallback when Google can't load (e.g. on localhost)
+  const esriStreet = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { attribution:'&copy; Esri', maxZoom:19 });
+  const esriSat = L.layerGroup([
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution:'&copy; Esri', maxZoom:19 }),
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom:19 })
+  ]);
+  esriSat.addTo(map);
+  const layerControl = L.control.layers(
+    { '🛰️ ดาวเทียม (สำรอง)': esriSat, '🗺️ ถนน (สำรอง)': esriStreet }, {},
+    { position:'topright', collapsed:true }).addTo(map);
+
+  // Google Maps base layers (preferred) — load when the key's site is allowed (the deployed GitHub Pages)
+  (function initGoogle(){
+    const key = ((window.GMAPS_CONFIG && window.GMAPS_CONFIG.key) || '').trim();
+    const h = location.hostname;
+    const isLocal = h==='localhost' || h==='127.0.0.1' || h==='[::1]' || h.endsWith('.local');
+    // The key is referrer-locked to the deployed site, so Google tiles only render there.
+    // On localhost keep Esri (avoids a blank Google layer).
+    if (!key || isLocal || !(L.gridLayer && L.gridLayer.googleMutant)) return;
+    const cb = 'gmi_'+Math.random().toString(36).slice(2);
+    window[cb] = function(){
+      try{
+        const gHybrid = L.gridLayer.googleMutant({ type:'hybrid',    maxZoom:21 });
+        const gSat    = L.gridLayer.googleMutant({ type:'satellite', maxZoom:21 });
+        const gRoad   = L.gridLayer.googleMutant({ type:'roadmap',   maxZoom:21 });
+        layerControl.addBaseLayer(gHybrid, '🛰️ Google ดาวเทียม+ป้าย');
+        layerControl.addBaseLayer(gSat,    '🛰️ Google ดาวเทียม');
+        layerControl.addBaseLayer(gRoad,   '🗺️ Google ถนน');
+        map.removeLayer(esriSat); gHybrid.addTo(map);   // make Google the default view
+      }catch(e){ console.error('Google layers', e); }
+    };
+    const s=document.createElement('script');
+    s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(key)+'&callback='+cb+'&loading=async';
+    s.async=true; document.head.appendChild(s);
+  })();
+
+  map.on('click', e => { if (document.getElementById('addmode').checked) addPin(e.latlng.lat, e.latlng.lng); });
+
+  // ---------- Pins ----------
+  function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+  function addPin(lat,lng,name){
+    const p={ id:uid(), name:name||'', lat:+lat, lng:+lng };
+    pins.push(p); makeMarker(p);
+    if(!p.name) reverseGeocode(p);
+    savePins(); render();
+  }
+  function makeMarker(p){
+    p.marker = L.marker([p.lat,p.lng], { draggable:true, icon:pinIcon(pins.indexOf(p)+1) }).addTo(map);
+    p.marker.on('dragend', ev=>{ const ll=ev.target.getLatLng(); p.lat=ll.lat; p.lng=ll.lng; savePins(); render(); });
+  }
+  function pinIcon(n){ return L.divIcon({ className:'', html:`<div class="leaflet-div-pin"><span>${n}</span></div>`, iconSize:[26,26], iconAnchor:[13,26] }); }
+  function clearPins(){ pins.forEach(p=>{ if(p.marker) map.removeLayer(p.marker); }); pins=[]; }
+  function removePin(id){ const i=pins.findIndex(p=>p.id===id); if(i<0)return; if(pins[i].marker) map.removeLayer(pins[i].marker); pins.splice(i,1); savePins(); render(); }
+  function move(id,dir){ const i=pins.findIndex(p=>p.id===id), j=i+dir; if(i<0||j<0||j>=pins.length)return; [pins[i],pins[j]]=[pins[j],pins[i]]; savePins(); render(); }
+
+  // ---------- Navigation (Google Maps) ----------
+  function navTo(p){ window.open(`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}&travelmode=driving`,'_blank'); }
+  function navRoute(pts){
+    if(!pts.length) return;
+    if(pts.length>10) alert('Google Maps นำทางได้สูงสุด ~10 จุด/ครั้ง — จะนำทาง 10 จุดแรกให้');
+    const use=pts.slice(0,10).map(p=>`${p.lat},${p.lng}`);
+    const destination=use[use.length-1], waypoints=use.slice(0,-1).join('|');
+    let url=`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`;
+    if(waypoints) url+=`&waypoints=${encodeURIComponent(waypoints)}`;
+    window.open(url,'_blank');
+  }
+
+  // ---------- Trips (daily log) ----------
+  function saveTrip(){
+    if(!pins.length){ alert('ยังไม่มีหมุด — ปักหมุดก่อนบันทึก'); return; }
+    const def = 'ทริป ' + new Date().toLocaleDateString('th-TH', {day:'numeric',month:'short',year:'2-digit'});
+    const name = prompt('ตั้งชื่อทริป (เช่น วันที่/ลูกค้า):', def);
+    if(name===null) return;
+    trips.unshift({ id:uid(), name:name.trim()||def, date:new Date().toISOString(),
+                    pins: pins.map(p=>({ name:p.name, lat:p.lat, lng:p.lng })) });
+    saveTrips(); renderHistory();
+    alert('✅ บันทึกทริปแล้ว — ดูได้ในแท็บ "ประวัติ"');
+  }
+  function loadTrip(id){
+    const t=trips.find(x=>x.id===id); if(!t) return;
+    if(pins.length && !confirm('โหลดทริปนี้? หมุดปัจจุบันจะถูกแทนที่\n(ถ้ายังไม่บันทึก ให้กดยกเลิกแล้วบันทึกก่อน)')) return;
+    clearPins();
+    t.pins.forEach(p=>{ const np={id:uid(),name:p.name,lat:p.lat,lng:p.lng}; pins.push(np); makeMarker(np); });
+    savePins(); render();
+    if(pins.length) map.fitBounds(L.latLngBounds(pins.map(p=>[p.lat,p.lng])).pad(0.3));
+    switchView('current');
+  }
+  function deleteTrip(id){
+    if(!confirm('ลบทริปนี้ออกจากประวัติ?')) return;
+    trips=trips.filter(t=>t.id!==id); saveTrips(); renderHistory();
+  }
+
+  // ---------- Render ----------
+  function render(){
+    pins.forEach((p,i)=>{ if(p.marker) p.marker.setIcon(pinIcon(i+1)); });
+    if(routeLine) map.removeLayer(routeLine);
+    if(pins.length>=2) routeLine=L.polyline(pins.map(p=>[p.lat,p.lng]),{color:'#2563eb',weight:3,opacity:.7,dashArray:'8,6'}).addTo(map);
+    const chip=document.getElementById('chip');
+    if(pins.length){ chip.style.display='block'; chip.textContent=`📍 ${pins.length} จุด`; } else chip.style.display='none';
+
+    const list=document.getElementById('list');
+    if(!pins.length){ list.innerHTML='<div class="empty">ยังไม่มีหมุด<br>แตะบนแผนที่ หรือค้นหาสถานที่เพื่อเพิ่มจุดแรก</div>'; }
+    else {
+      list.innerHTML='';
+      pins.forEach((p,i)=>{
+        const div=document.createElement('div'); div.className='pin';
+        div.innerHTML=`<div class="pin-num">${i+1}</div>
+          <div class="pin-body"><input class="pin-name" value="${(p.name||'').replace(/"/g,'&quot;')}" placeholder="จุดที่ ${i+1}">
+          <div class="pin-sub">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div></div>
+          <div class="pin-acts">
+            <button class="icon-btn" data-a="up">▲</button><button class="icon-btn" data-a="down">▼</button>
+            <button class="icon-btn nav" data-a="nav">🧭</button><button class="icon-btn del" data-a="del">✕</button></div>`;
+        div.querySelector('.pin-name').addEventListener('change',e=>{ p.name=e.target.value; savePins(); });
+        div.querySelector('[data-a=up]').onclick=()=>move(p.id,-1);
+        div.querySelector('[data-a=down]').onclick=()=>move(p.id,1);
+        div.querySelector('[data-a=nav]').onclick=()=>navTo(p);
+        div.querySelector('[data-a=del]').onclick=()=>removePin(p.id);
+        div.querySelector('.pin-num').onclick=()=>map.panTo([p.lat,p.lng]);
+        list.appendChild(div);
+      });
+    }
+    document.getElementById('btn-route').disabled=!pins.length;
+    document.getElementById('btn-savetrip').disabled=!pins.length;
+  }
+
+  function renderHistory(){
+    const el=document.getElementById('history-list');
+    document.getElementById('tab-history').textContent=`📅 ประวัติ (${trips.length})`;
+    if(!trips.length){ el.innerHTML='<div class="empty">ยังไม่มีทริปที่บันทึก<br>ปักหมุดในแท็บ "ทริปปัจจุบัน" แล้วกด 💾 บันทึกทริป</div>'; return; }
+    el.innerHTML='';
+    trips.forEach(t=>{
+      const d=new Date(t.date);
+      const div=document.createElement('div'); div.className='trip';
+      div.innerHTML=`<div class="trip-top"><div class="trip-name">${t.name}</div></div>
+        <div class="trip-sub">${d.toLocaleDateString('th-TH')} ${d.toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})} · ${t.pins.length} จุด</div>
+        <div class="trip-acts">
+          <button class="btn btn-primary btn-sm" data-a="load">👁️ ดู/โหลด</button>
+          <button class="btn btn-go btn-sm" data-a="nav">🧭 นำทาง</button>
+          <button class="btn btn-danger btn-sm" data-a="del">🗑️</button></div>`;
+      div.querySelector('[data-a=load]').onclick=()=>loadTrip(t.id);
+      div.querySelector('[data-a=nav]').onclick=()=>navRoute(t.pins);
+      div.querySelector('[data-a=del]').onclick=()=>deleteTrip(t.id);
+      el.appendChild(div);
+    });
+  }
+
+  function switchView(v){
+    document.getElementById('view-current').style.display = v==='current'?'flex':'none';
+    document.getElementById('view-history').style.display = v==='history'?'flex':'none';
+    document.getElementById('tab-current').classList.toggle('active', v==='current');
+    document.getElementById('tab-history').classList.toggle('active', v==='history');
+    if(v==='history') renderHistory();
+  }
+
+  // ---------- Persistence ----------
+  function savePins(){ try{ localStorage.setItem(STORE_PINS, JSON.stringify(pins.map(p=>({id:p.id,name:p.name,lat:p.lat,lng:p.lng})))); }catch(e){} }
+  function saveTrips(){ try{ localStorage.setItem(STORE_TRIPS, JSON.stringify(trips)); }catch(e){} }
+  function load(){
+    try{ JSON.parse(localStorage.getItem(STORE_PINS)||'[]').forEach(p=>{ pins.push({...p}); makeMarker(pins[pins.length-1]); });
+         if(pins.length) map.fitBounds(L.latLngBounds(pins.map(p=>[p.lat,p.lng])).pad(0.3)); }catch(e){}
+    try{ trips = JSON.parse(localStorage.getItem(STORE_TRIPS)||'[]'); }catch(e){ trips=[]; }
+    render(); renderHistory();
+  }
+
+  // ---------- Search / geocode ----------
+  function reverseGeocode(p){
+    fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${p.lat}&lon=${p.lng}&accept-language=th&zoom=18`)
+      .then(r=>r.json()).then(d=>{ if(p.name)return; const a=d.address||{};
+        p.name=a.road||a.neighbourhood||a.suburb||(d.display_name||'').split(',')[0]||''; savePins(); render(); }).catch(()=>{});
+  }
+  function doSearch(){
+    const q=document.getElementById('search').value.trim(), res=document.getElementById('search-results');
+    if(!q){ res.innerHTML=''; return; }
+    const c=q.match(/^(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)$/);
+    if(c){ addPin(parseFloat(c[1]),parseFloat(c[2]),'พิกัด'); map.setView([parseFloat(c[1]),parseFloat(c[2])],16); res.innerHTML=''; document.getElementById('search').value=''; return; }
+    res.innerHTML='<div class="hint">กำลังค้นหา...</div>';
+    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5&accept-language=th`)
+      .then(r=>r.json()).then(data=>{
+        if(!data.length){ res.innerHTML='<div class="hint">ไม่พบสถานที่</div>'; return; }
+        res.innerHTML='';
+        data.forEach(pl=>{ const it=document.createElement('div'); it.className='sr-item';
+          it.textContent='📍 '+pl.display_name.split(',').slice(0,3).join(',');
+          it.onclick=()=>{ addPin(parseFloat(pl.lat),parseFloat(pl.lon),pl.display_name.split(',')[0]); map.setView([parseFloat(pl.lat),parseFloat(pl.lon)],16); res.innerHTML=''; document.getElementById('search').value=''; };
+          res.appendChild(it); });
+      }).catch(()=>{ res.innerHTML='<div class="hint">ค้นหาไม่สำเร็จ</div>'; });
+  }
+
+  // ---------- Export / import ----------
+  function exportTrips(){
+    if(!trips.length){ alert('ยังไม่มีทริปให้สำรอง'); return; }
+    const blob=new Blob([JSON.stringify(trips,null,2)],{type:'application/json'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='multinav-trips-'+new Date().toISOString().slice(0,10)+'.json';
+    document.body.appendChild(a); a.click(); setTimeout(()=>{a.remove(); URL.revokeObjectURL(a.href);},800);
+  }
+  function importTrips(e){
+    const f=e.target.files[0]; if(!f) return;
+    f.text().then(txt=>{ const arr=JSON.parse(txt); if(!Array.isArray(arr)) throw 0;
+      const ids=new Set(trips.map(t=>t.id)); arr.forEach(t=>{ if(t&&t.id&&!ids.has(t.id)) trips.push(t); });
+      trips.sort((a,b)=>(b.date||'').localeCompare(a.date||'')); saveTrips(); renderHistory(); alert('นำเข้าแล้ว'); })
+      .catch(()=>alert('ไฟล์ไม่ถูกต้อง')); e.target.value='';
+  }
+
+  // ---------- Buttons ----------
+  document.getElementById('btn-search').onclick=doSearch;
+  document.getElementById('search').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); doSearch(); } });
+  document.getElementById('btn-route').onclick=()=>navRoute(pins);
+  document.getElementById('btn-savetrip').onclick=saveTrip;
+  document.getElementById('btn-export').onclick=exportTrips;
+  document.getElementById('btn-import').onclick=()=>document.getElementById('import-file').click();
+  document.getElementById('import-file').addEventListener('change',importTrips);
+  document.getElementById('tab-current').onclick=()=>switchView('current');
+  document.getElementById('tab-history').onclick=()=>switchView('history');
+  document.getElementById('btn-clear').onclick=()=>{ if(!pins.length)return; if(!confirm('ล้างหมุดปัจจุบัน? (ประวัติที่บันทึกไว้ไม่หาย)'))return; clearPins(); savePins(); render(); };
+  document.getElementById('btn-locate').onclick=()=>{
+    if(!navigator.geolocation){ alert('อุปกรณ์ไม่รองรับระบุตำแหน่ง'); return; }
+    navigator.geolocation.getCurrentPosition(pos=>{ const {latitude:lat,longitude:lng}=pos.coords; map.setView([lat,lng],16);
+      if(meMarker) map.removeLayer(meMarker);
+      meMarker=L.circleMarker([lat,lng],{radius:8,color:'#fff',weight:2,fillColor:'#2563eb',fillOpacity:1}).addTo(map).bindPopup('ตำแหน่งฉัน');
+    }, ()=>alert('ระบุตำแหน่งไม่สำเร็จ (อนุญาตการเข้าถึงตำแหน่งหรือยัง?)'), {enableHighAccuracy:true}); };
+
+  load();
+})();
+</script>
+</body>
+</html>
