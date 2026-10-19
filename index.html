@@ -337,24 +337,29 @@
     const c=q.match(/^(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)$/);
     if(c){ pickResult(parseFloat(c[1]),parseFloat(c[2]),'พิกัด'); return; }
     res.innerHTML='<div class="hint">กำลังค้นหา...</div>';
-    if(window.google && window.google.maps && window.google.maps.Geocoder) googleSearch(q);
+    if(window.google && window.google.maps && google.maps.importLibrary) placesSearch(q);
     else nominatimSearch(q);
   }
-  function googleSearch(q){
+  function esc(s){ return (s||'').replace(/</g,'&lt;'); }
+  async function placesSearch(q){
     const res=document.getElementById('search-results');
     try{
-      new google.maps.Geocoder().geocode({ address:q, region:'th', componentRestrictions:{country:'TH'} }, (results,status)=>{
-        if(status==='OK' && results && results.length){
-          res.innerHTML='';
-          results.slice(0,6).forEach(r=>{
-            const loc=r.geometry.location, it=document.createElement('div'); it.className='sr-item';
-            it.textContent='📍 '+r.formatted_address;
-            it.onclick=()=>pickResult(loc.lat(),loc.lng(), r.formatted_address.split(',')[0]);
-            res.appendChild(it);
-          });
-        } else nominatimSearch(q);
+      const { Place } = await google.maps.importLibrary('places');
+      const { places } = await Place.searchByText({
+        textQuery:q, fields:['displayName','location','formattedAddress'],
+        language:'th', region:'th', maxResultCount:8
       });
-    }catch(e){ nominatimSearch(q); }
+      if(places && places.length){
+        res.innerHTML='';
+        places.forEach(pl=>{
+          const loc=pl.location, name=pl.displayName||(pl.formattedAddress||'').split(',')[0];
+          const it=document.createElement('div'); it.className='sr-item';
+          it.innerHTML='📍 <b>'+esc(name)+'</b>'+(pl.formattedAddress?('<br><span style="color:var(--muted);font-size:.7rem">'+esc(pl.formattedAddress)+'</span>'):'');
+          it.onclick=()=>pickResult(loc.lat(), loc.lng(), name);
+          res.appendChild(it);
+        });
+      } else nominatimSearch(q);
+    }catch(e){ console.warn('places search failed', e); nominatimSearch(q); }
   }
   function nominatimSearch(q){
     const res=document.getElementById('search-results');
