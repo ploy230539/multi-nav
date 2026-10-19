@@ -158,7 +158,10 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet.gridlayer.googlemutant@0.14.0/dist/Leaflet.GoogleMutant.js"></script>
 <script src="maps-config.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
 <script>
 (function(){
   const STORE_PINS = 'multinav-pins';   // current working pins
@@ -329,11 +332,7 @@
   // ---------- Persistence ----------
   function savePins(){ try{ localStorage.setItem(STORE_PINS, JSON.stringify(pins.map(p=>({id:p.id,name:p.name,lat:p.lat,lng:p.lng})))); }catch(e){} }
 
-  // ---------- Trip store: local (per device) OR cloud (Supabase, synced across devices) ----------
-  const SB_URL='https://nzzwktxiopkmzuzbafed.supabase.co';
-  const SB_KEY='sb_publishable_sr6KTzIjFkGSqAUa3OqZdw_kLJMyxt-';
-  let sb = (window.supabase && window.supabase.createClient) ? window.supabase.createClient(SB_URL, SB_KEY) : null;
-  let cloudUser = null;
+  // ---------- Trip store: local (per device) OR cloud (Firebase + Google login, synced) ----------
   const LocalStore = {
     async list(){ try{ return JSON.parse(localStorage.getItem(STORE_TRIPS)||'[]'); }catch(e){ return []; } },
     async _set(a){ try{ localStorage.setItem(STORE_TRIPS, JSON.stringify(a)); }catch(e){} },
@@ -341,42 +340,42 @@
     async remove(id){ await this._set((await this.list()).filter(x=>x.id!==id)); },
     async saveMany(list){ const a=await this.list(), m={}; a.forEach(t=>m[t.id]=t); list.forEach(t=>{ if(t&&t.id)m[t.id]=t; }); await this._set(Object.values(m).sort((x,y)=>(y.date||'').localeCompare(x.date||''))); }
   };
+
+  let fbAuth=null, fbDb=null, cloudUser=null;
+  function initFirebase(){
+    const cfg=window.FIREBASE_CONFIG;
+    if(!cfg || !cfg.apiKey || !window.firebase) return false;
+    try{ firebase.initializeApp(cfg); fbAuth=firebase.auth(); fbDb=firebase.firestore(); return true; }
+    catch(e){ console.warn('firebase init', e); return false; }
+  }
+
   const CloudStore = {
-    async list(){ const {data,error}=await sb.from('trips').select('*').order('date',{ascending:false}); if(error)throw error; return data||[]; },
-    async save(t){ const rec={...t, updated_at:new Date().toISOString(), created_by:(t.created_by||(cloudUser&&cloudUser.email)||null)}; const {error}=await sb.from('trips').upsert(rec); if(error)throw error; },
-    async remove(id){ const {error}=await sb.from('trips').delete().eq('id',id); if(error)throw error; },
-    async saveMany(list){ if(!list.length)return; const recs=list.map(t=>({...t, updated_at:new Date().toISOString(), created_by:(t.created_by||(cloudUser&&cloudUser.email)||null)})); const {error}=await sb.from('trips').upsert(recs); if(error)throw error; }
+    async list(){ const snap=await fbDb.collection('trips').where('owner','==',cloudUser.uid).get();
+      const arr=snap.docs.map(d=>d.data()); arr.sort((a,b)=>(b.date||'').localeCompare(a.date||'')); return arr; },
+    async save(t){ await fbDb.collection('trips').doc(t.id).set({...t, owner:cloudUser.uid, updated_at:new Date().toISOString()}); },
+    async remove(id){ await fbDb.collection('trips').doc(id).delete(); },
+    async saveMany(list){ const b=fbDb.batch(); list.forEach(t=>{ if(t&&t.id) b.set(fbDb.collection('trips').doc(t.id), {...t, owner:cloudUser.uid, updated_at:new Date().toISOString()}); }); await b.commit(); }
   };
   let store = LocalStore;
 
   async function refreshTrips(){ try{ trips = await store.list(); }catch(e){ trips=[]; toast('โหลดทริปไม่สำเร็จ'); } renderHistory(); }
 
-  async function initCloud(){
-    if(!sb){ renderCloudBar(); await refreshTrips(); return; }
-    try{ const {data}=await sb.auth.getSession(); cloudUser = data&&data.session ? data.session.user : null; }catch(e){ cloudUser=null; }
-    store = cloudUser ? CloudStore : LocalStore;
-    renderCloudBar(); await refreshTrips();
-  }
-
   function renderCloudBar(){
     const el=document.getElementById('cloud-bar'); if(!el) return;
-    if(!sb){ el.style.display='none'; return; }
+    if(!fbAuth){ el.style.display='none'; return; }
     el.style.display='block';
     if(cloudUser){
       el.innerHTML=`<div style="display:flex;align-items:center;gap:6px;color:#34d399;font-size:.82rem;margin-bottom:8px">
-          ☁️ <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(cloudUser.email)}</span>
+          ☁️ <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(cloudUser.email||cloudUser.displayName||'เข้าสู่ระบบแล้ว')}</span>
           <button class="btn btn-ghost btn-sm" id="cloud-out">ออก</button></div>
         <button class="btn btn-ghost btn-sm" id="cloud-mig" style="width:100%">⬆️ ดันทริปในเครื่องขึ้นคลาวด์</button>`;
-      document.getElementById('cloud-out').onclick=async()=>{ await sb.auth.signOut(); cloudUser=null; store=LocalStore; renderCloudBar(); await refreshTrips(); toast('ออกจากคลาวด์แล้ว — ใช้ข้อมูลในเครื่อง'); };
+      document.getElementById('cloud-out').onclick=async()=>{ try{ await fbAuth.signOut(); toast('ออกจากระบบแล้ว'); }catch(e){} };
       document.getElementById('cloud-mig').onclick=async()=>{ try{ const local=await LocalStore.list(); if(!local.length){ toast('ไม่มีทริปในเครื่อง'); return; } await CloudStore.saveMany(local); await refreshTrips(); toast('⬆️ ดันขึ้นคลาวด์ '+local.length+' ทริปแล้ว'); }catch(e){ toast('ไม่สำเร็จ: '+(e.message||e)); } };
     } else {
-      el.innerHTML=`<div style="font-size:.82rem;color:var(--muted);margin-bottom:6px">☁️ เข้าสู่ระบบเพื่อซิงก์ทริปข้ามเครื่อง</div>
-        <input type="email" id="cl-email" placeholder="อีเมล" autocomplete="username" style="margin-bottom:6px">
-        <input type="password" id="cl-pw" placeholder="รหัสผ่าน" autocomplete="current-password" style="margin-bottom:6px">
-        <button class="btn btn-primary btn-sm" id="cloud-in" style="width:100%">เข้าสู่ระบบ</button>`;
-      document.getElementById('cloud-in').onclick=async()=>{
-        try{ const {error}=await sb.auth.signInWithPassword({ email:document.getElementById('cl-email').value.trim(), password:document.getElementById('cl-pw').value }); if(error)throw error;
-          const {data}=await sb.auth.getSession(); cloudUser=data.session.user; store=CloudStore; renderCloudBar(); await refreshTrips(); toast('☁️ เข้าสู่ระบบแล้ว — ทริปจะซิงก์ทุกเครื่อง'); }
+      el.innerHTML=`<div style="font-size:.82rem;color:var(--muted);margin-bottom:8px">☁️ เข้าสู่ระบบเพื่อซิงก์ทริปทุกเครื่อง</div>
+        <button class="btn btn-primary btn-sm" id="cloud-google" style="width:100%">🔵 เข้าสู่ระบบด้วย Google</button>`;
+      document.getElementById('cloud-google').onclick=async()=>{
+        try{ await fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
         catch(e){ toast('เข้าสู่ระบบไม่สำเร็จ: '+(e.message||e)); }
       };
     }
@@ -386,7 +385,13 @@
     try{ JSON.parse(localStorage.getItem(STORE_PINS)||'[]').forEach(p=>{ pins.push({...p}); makeMarker(pins[pins.length-1]); });
          if(pins.length) map.fitBounds(L.latLngBounds(pins.map(p=>[p.lat,p.lng])).pad(0.3)); }catch(e){}
     render();
-    initCloud();   // sets store (cloud if logged in) + loads trips + auth bar
+    if(initFirebase()){
+      fbAuth.onAuthStateChanged(async user=>{
+        cloudUser = user || null;
+        store = cloudUser ? CloudStore : LocalStore;
+        renderCloudBar(); await refreshTrips();
+      });
+    } else { renderCloudBar(); refreshTrips(); }
   }
 
   // ---------- Search / geocode ----------
