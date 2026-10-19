@@ -64,6 +64,15 @@
   .sr-item{padding:7px 9px; border-radius:7px; background:var(--bg); border:1px solid var(--line); margin-bottom:5px; cursor:pointer; font-size:.8rem;}
   .sr-item:active{background:#273449;}
   @media (max-width:760px){ #app{flex-direction:column;} #map{height:48vh;} #panel{width:100%; flex:1; border-right:none; border-top:1px solid var(--line);} }
+  /* in-app dialogs (native prompt/confirm are unreliable on mobile) */
+  .modal-overlay{position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; z-index:3000; padding:22px;}
+  .modal-box{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; width:100%; max-width:340px;}
+  .modal-title{font-size:1rem; font-weight:700; margin-bottom:12px; line-height:1.4;}
+  .modal-box input{width:100%; margin-bottom:14px;}
+  .modal-btns{display:flex; gap:8px;} .modal-btns .btn{flex:1; padding:11px;}
+  .toast{position:fixed; bottom:26px; left:50%; transform:translateX(-50%); background:#111c33; color:#fff;
+         padding:11px 20px; border-radius:22px; z-index:3100; border:1px solid var(--line); font-size:.9rem;
+         box-shadow:0 4px 18px rgba(0,0,0,.45); max-width:90%; text-align:center;}
 </style>
 </head>
 <body>
@@ -121,6 +130,18 @@
   </div>
   <div id="map"><div class="count-chip" id="chip" style="display:none"></div></div>
 </div>
+
+<div id="modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title" id="modal-title"></div>
+    <input type="text" id="modal-input" style="display:none">
+    <div class="modal-btns">
+      <button class="btn btn-ghost" id="modal-cancel">ยกเลิก</button>
+      <button class="btn btn-primary" id="modal-ok">ตกลง</button>
+    </div>
+  </div>
+</div>
+<div id="toast" class="toast" style="display:none"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet.gridlayer.googlemutant@0.14.0/dist/Leaflet.GoogleMutant.js"></script>
@@ -195,7 +216,7 @@
   function navTo(p){ window.open(`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}&travelmode=driving`,'_blank'); }
   function navRoute(pts){
     if(!pts.length) return;
-    if(pts.length>10) alert('Google Maps นำทางได้สูงสุด ~10 จุด/ครั้ง — จะนำทาง 10 จุดแรกให้');
+    if(pts.length>10) toast('Google Maps นำทางได้สูงสุด ~10 จุด/ครั้ง — นำทาง 10 จุดแรก');
     const use=pts.slice(0,10).map(p=>`${p.lat},${p.lng}`);
     const destination=use[use.length-1], waypoints=use.slice(0,-1).join('|');
     let url=`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`;
@@ -204,27 +225,27 @@
   }
 
   // ---------- Trips (daily log) ----------
-  function saveTrip(){
-    if(!pins.length){ alert('ยังไม่มีหมุด — ปักหมุดก่อนบันทึก'); return; }
+  async function saveTrip(){
+    if(!pins.length){ toast('ยังไม่มีหมุด — ปักหมุดก่อน'); return; }
     const def = 'ทริป ' + new Date().toLocaleDateString('th-TH', {day:'numeric',month:'short',year:'2-digit'});
-    const name = prompt('ตั้งชื่อทริป (เช่น วันที่/ลูกค้า):', def);
+    const name = await showModal({ title:'ตั้งชื่อทริป (เช่น วันที่/ลูกค้า)', input:true, value:def, placeholder:'ชื่อทริป', okText:'บันทึก' });
     if(name===null) return;
-    trips.unshift({ id:uid(), name:name.trim()||def, date:new Date().toISOString(),
+    trips.unshift({ id:uid(), name:(name||def), date:new Date().toISOString(),
                     pins: pins.map(p=>({ name:p.name, lat:p.lat, lng:p.lng })) });
     saveTrips(); renderHistory();
-    alert('✅ บันทึกทริปแล้ว — ดูได้ในแท็บ "ประวัติ"');
+    toast('✅ บันทึกทริปแล้ว — ดูในแท็บ "ประวัติ"');
   }
-  function loadTrip(id){
+  async function loadTrip(id){
     const t=trips.find(x=>x.id===id); if(!t) return;
-    if(pins.length && !confirm('โหลดทริปนี้? หมุดปัจจุบันจะถูกแทนที่\n(ถ้ายังไม่บันทึก ให้กดยกเลิกแล้วบันทึกก่อน)')) return;
+    if(pins.length && !(await confirmModal('โหลดทริปนี้? หมุดปัจจุบันจะถูกแทนที่', 'โหลด'))) return;
     clearPins();
     t.pins.forEach(p=>{ const np={id:uid(),name:p.name,lat:p.lat,lng:p.lng}; pins.push(np); makeMarker(np); });
     savePins(); render();
     if(pins.length) map.fitBounds(L.latLngBounds(pins.map(p=>[p.lat,p.lng])).pad(0.3));
     switchView('current');
   }
-  function deleteTrip(id){
-    if(!confirm('ลบทริปนี้ออกจากประวัติ?')) return;
+  async function deleteTrip(id){
+    if(!(await confirmModal('ลบทริปนี้ออกจากประวัติ?', 'ลบ'))) return;
     trips=trips.filter(t=>t.id!==id); saveTrips(); renderHistory();
   }
 
@@ -306,26 +327,51 @@
       .then(r=>r.json()).then(d=>{ if(p.name)return; const a=d.address||{};
         p.name=a.road||a.neighbourhood||a.suburb||(d.display_name||'').split(',')[0]||''; savePins(); render(); }).catch(()=>{});
   }
+  function pickResult(lat,lng,label){
+    addPin(lat,lng,label); map.setView([lat,lng],16);
+    document.getElementById('search-results').innerHTML=''; document.getElementById('search').value='';
+  }
   function doSearch(){
     const q=document.getElementById('search').value.trim(), res=document.getElementById('search-results');
     if(!q){ res.innerHTML=''; return; }
     const c=q.match(/^(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)$/);
-    if(c){ addPin(parseFloat(c[1]),parseFloat(c[2]),'พิกัด'); map.setView([parseFloat(c[1]),parseFloat(c[2])],16); res.innerHTML=''; document.getElementById('search').value=''; return; }
+    if(c){ pickResult(parseFloat(c[1]),parseFloat(c[2]),'พิกัด'); return; }
     res.innerHTML='<div class="hint">กำลังค้นหา...</div>';
-    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5&accept-language=th`)
+    if(window.google && window.google.maps && window.google.maps.Geocoder) googleSearch(q);
+    else nominatimSearch(q);
+  }
+  function googleSearch(q){
+    const res=document.getElementById('search-results');
+    try{
+      new google.maps.Geocoder().geocode({ address:q, region:'th', componentRestrictions:{country:'TH'} }, (results,status)=>{
+        if(status==='OK' && results && results.length){
+          res.innerHTML='';
+          results.slice(0,6).forEach(r=>{
+            const loc=r.geometry.location, it=document.createElement('div'); it.className='sr-item';
+            it.textContent='📍 '+r.formatted_address;
+            it.onclick=()=>pickResult(loc.lat(),loc.lng(), r.formatted_address.split(',')[0]);
+            res.appendChild(it);
+          });
+        } else nominatimSearch(q);
+      });
+    }catch(e){ nominatimSearch(q); }
+  }
+  function nominatimSearch(q){
+    const res=document.getElementById('search-results');
+    fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=6&countrycodes=th&accept-language=th`)
       .then(r=>r.json()).then(data=>{
         if(!data.length){ res.innerHTML='<div class="hint">ไม่พบสถานที่</div>'; return; }
         res.innerHTML='';
         data.forEach(pl=>{ const it=document.createElement('div'); it.className='sr-item';
           it.textContent='📍 '+pl.display_name.split(',').slice(0,3).join(',');
-          it.onclick=()=>{ addPin(parseFloat(pl.lat),parseFloat(pl.lon),pl.display_name.split(',')[0]); map.setView([parseFloat(pl.lat),parseFloat(pl.lon)],16); res.innerHTML=''; document.getElementById('search').value=''; };
+          it.onclick=()=>pickResult(parseFloat(pl.lat),parseFloat(pl.lon), pl.display_name.split(',')[0]);
           res.appendChild(it); });
       }).catch(()=>{ res.innerHTML='<div class="hint">ค้นหาไม่สำเร็จ</div>'; });
   }
 
   // ---------- Export / import ----------
   function exportTrips(){
-    if(!trips.length){ alert('ยังไม่มีทริปให้สำรอง'); return; }
+    if(!trips.length){ toast('ยังไม่มีทริปให้สำรอง'); return; }
     const blob=new Blob([JSON.stringify(trips,null,2)],{type:'application/json'});
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
     a.download='multinav-trips-'+new Date().toISOString().slice(0,10)+'.json';
@@ -335,9 +381,30 @@
     const f=e.target.files[0]; if(!f) return;
     f.text().then(txt=>{ const arr=JSON.parse(txt); if(!Array.isArray(arr)) throw 0;
       const ids=new Set(trips.map(t=>t.id)); arr.forEach(t=>{ if(t&&t.id&&!ids.has(t.id)) trips.push(t); });
-      trips.sort((a,b)=>(b.date||'').localeCompare(a.date||'')); saveTrips(); renderHistory(); alert('นำเข้าแล้ว'); })
-      .catch(()=>alert('ไฟล์ไม่ถูกต้อง')); e.target.value='';
+      trips.sort((a,b)=>(b.date||'').localeCompare(a.date||'')); saveTrips(); renderHistory(); toast('นำเข้าแล้ว'); })
+      .catch(()=>toast('ไฟล์ไม่ถูกต้อง')); e.target.value='';
   }
+
+  // ---------- In-app dialogs (native prompt/confirm are blocked on mobile) ----------
+  let _modalResolve=null;
+  function showModal(opts){
+    return new Promise(res=>{
+      _modalResolve=res;
+      document.getElementById('modal-title').textContent=opts.title||'';
+      const inp=document.getElementById('modal-input');
+      inp.style.display=opts.input?'block':'none';
+      inp.value=opts.value||''; inp.placeholder=opts.placeholder||'';
+      document.getElementById('modal-ok').textContent=opts.okText||'ตกลง';
+      document.getElementById('modal').style.display='flex';
+      if(opts.input) setTimeout(()=>{ inp.focus(); try{inp.select();}catch(e){} },60);
+    });
+  }
+  function closeModal(val){ document.getElementById('modal').style.display='none'; const r=_modalResolve; _modalResolve=null; if(r) r(val); }
+  function confirmModal(title, okText){ return showModal({title, okText:okText||'ตกลง'}).then(v=>v!==null); }
+  function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block'; clearTimeout(t._t); t._t=setTimeout(()=>t.style.display='none',2300); }
+  document.getElementById('modal-ok').onclick=()=>{ const inp=document.getElementById('modal-input'); closeModal(inp.style.display==='none'?true:inp.value.trim()); };
+  document.getElementById('modal-cancel').onclick=()=>closeModal(null);
+  document.getElementById('modal-input').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); document.getElementById('modal-ok').click(); }});
 
   // ---------- Buttons ----------
   document.getElementById('btn-search').onclick=doSearch;
@@ -349,13 +416,13 @@
   document.getElementById('import-file').addEventListener('change',importTrips);
   document.getElementById('tab-current').onclick=()=>switchView('current');
   document.getElementById('tab-history').onclick=()=>switchView('history');
-  document.getElementById('btn-clear').onclick=()=>{ if(!pins.length)return; if(!confirm('ล้างหมุดปัจจุบัน? (ประวัติที่บันทึกไว้ไม่หาย)'))return; clearPins(); savePins(); render(); };
+  document.getElementById('btn-clear').onclick=async ()=>{ if(!pins.length)return; if(!(await confirmModal('ล้างหมุดปัจจุบัน? (ประวัติที่บันทึกไว้ไม่หาย)','ล้าง')))return; clearPins(); savePins(); render(); };
   document.getElementById('btn-locate').onclick=()=>{
-    if(!navigator.geolocation){ alert('อุปกรณ์ไม่รองรับระบุตำแหน่ง'); return; }
+    if(!navigator.geolocation){ toast('อุปกรณ์ไม่รองรับระบุตำแหน่ง'); return; }
     navigator.geolocation.getCurrentPosition(pos=>{ const {latitude:lat,longitude:lng}=pos.coords; map.setView([lat,lng],16);
       if(meMarker) map.removeLayer(meMarker);
       meMarker=L.circleMarker([lat,lng],{radius:8,color:'#fff',weight:2,fillColor:'#2563eb',fillOpacity:1}).addTo(map).bindPopup('ตำแหน่งฉัน');
-    }, ()=>alert('ระบุตำแหน่งไม่สำเร็จ (อนุญาตการเข้าถึงตำแหน่งหรือยัง?)'), {enableHighAccuracy:true}); };
+    }, ()=>toast('ระบุตำแหน่งไม่สำเร็จ (อนุญาตการเข้าถึงตำแหน่งหรือยัง?)'), {enableHighAccuracy:true}); };
 
   load();
 })();
