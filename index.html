@@ -60,8 +60,16 @@
   .leaflet-div-pin{background:var(--accent); color:#fff; border:2px solid #fff; border-radius:50% 50% 50% 0;
                    width:26px; height:26px; transform:rotate(-45deg); display:flex; align-items:center; justify-content:center; box-shadow:0 1px 4px rgba(0,0,0,.5);}
   .leaflet-div-pin span{transform:rotate(45deg); font-weight:700; font-size:.78rem;}
-  #search-results{margin-top:6px;}
-  .sr-item{padding:7px 9px; border-radius:7px; background:var(--bg); border:1px solid var(--line); margin-bottom:5px; cursor:pointer; font-size:.8rem;}
+  .search-wrap{position:relative;}
+  /* floating dropdown so results overlay everything until the user picks one */
+  #search-results{position:absolute; top:calc(100% + 5px); left:0; right:0; z-index:1500;
+                  background:var(--panel); border:1px solid var(--line); border-radius:10px;
+                  max-height:60vh; overflow-y:auto; box-shadow:0 12px 32px rgba(0,0,0,.6);}
+  #search-results:empty{display:none;}
+  #search-results .hint{padding:10px 12px; margin:0;}
+  .sr-item{padding:10px 12px; background:var(--panel); border:none; border-bottom:1px solid var(--line);
+           cursor:pointer; font-size:.84rem; line-height:1.35;}
+  .sr-item:last-child{border-bottom:none;}
   .sr-item:active{background:#273449;}
   @media (max-width:760px){ #app{flex-direction:column;} #map{height:48vh;} #panel{width:100%; flex:1; border-right:none; border-top:1px solid var(--line);} }
   /* in-app dialogs (native prompt/confirm are unreliable on mobile) */
@@ -91,11 +99,13 @@
     <!-- CURRENT TRIP VIEW -->
     <div class="view" id="view-current">
       <div class="section">
-        <div class="search-row">
-          <input type="text" id="search" placeholder="ค้นหาสถานที่ หรือ พิกัด 13.75,100.5">
-          <button class="btn btn-primary" id="btn-search">🔍</button>
+        <div class="search-wrap">
+          <div class="search-row">
+            <input type="text" id="search" placeholder="ค้นหาสถานที่ หรือ พิกัด 13.75,100.5">
+            <button class="btn btn-primary" id="btn-search">🔍</button>
+          </div>
+          <div id="search-results"></div>
         </div>
-        <div id="search-results"></div>
         <label class="toggle" style="margin-top:9px">
           <input type="checkbox" id="addmode" checked>
           <span>📍 โหมดปักหมุด (แตะแผนที่เพื่อเพิ่มจุด)</span>
@@ -413,7 +423,8 @@
 
   // ---------- Buttons ----------
   document.getElementById('btn-search').onclick=doSearch;
-  document.getElementById('search').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); doSearch(); } });
+  document.getElementById('search').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); doSearch(); } if(e.key==='Escape'){ document.getElementById('search-results').innerHTML=''; } });
+  document.addEventListener('click',e=>{ if(!e.target.closest('.search-wrap')) document.getElementById('search-results').innerHTML=''; });
   document.getElementById('btn-route').onclick=()=>navRoute(pins);
   document.getElementById('btn-savetrip').onclick=saveTrip;
   document.getElementById('btn-export').onclick=exportTrips;
